@@ -1,0 +1,202 @@
+---
+title: "DATA 621 - Homework 1"
+author: "Jeyaraman Ramalingam"
+date: "03/07/2021"
+output:
+  html_document:
+    df_print: paged
+    toc: yes
+    toc_float:
+      collapsed: no
+      smooth_scroll: no
+  word_document:
+    toc: yes
+  pdf_document:
+    toc: yes
+subtitle: Moneyball - Multiple Linear Regression Data Model
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+```{r, message=FALSE, warning=FALSE, echo=FALSE}
+library(tidyverse)
+library(kableExtra)
+library(corrplot)
+library(caret)
+library(DMwR)
+library(dplyr)
+```
+## Overview
+
+This document explains the different aspects of the multiple linear regression model built for predicting number of wins for a baseball team with the money ball training dataset provided. The key areas of interest are below.
+1. Data Exploration
+2. Data Preparation
+3. Model Building
+4. Model Performance Comparison
+
+
+## 1. Data Exploration
+
+The data set given for model building is the money ball training and evaluation datasets.
+
+1. moneyball-training-data.csv
+2. moneyball-evaluation-data.csv
+
+To Understand the training dataset , lets use some of the R functions to take a quick peek at the input dataset
+
+```{r, echo=FALSE}
+mb_train <- read.csv("C:\\Users\\User\\Desktop\\MSDS\\DATA 621\\moneyball-training-data.csv") %>%
+  select(-INDEX) # Dropping meaningless index
+mb_eval <- read.csv("C:\\Users\\User\\Desktop\\MSDS\\DATA 621\\moneyball-evaluation-data.csv")
+```
+### Data First look and brief summary
+```{r ,message=FALSE, warning=FALSE}
+nrow(mb_train)
+names(mb_train)
+summary(mb_train)
+head(mb_train, n=5) 
+```
+
+### Missing Data
+```{r ,message=FALSE, warning=FALSE}
+colSums(is.na(mb_train))
+```
+
+### Density plot 
+```{r , fig.height = 6, fig.width = 11, echo=FALSE, warning=FALSE, message=FALSE}
+mb_train %>%
+  gather(variable, value, TARGET_WINS:TEAM_FIELDING_DP) %>%
+  ggplot(., aes(value)) + 
+  geom_density(color="darkred", fill="red") + 
+  facet_wrap(~variable, scales ="free", ncol = 5) +
+  labs(x = element_blank(), y = element_blank())
+```
+
+
+### Box plot 
+```{r, fig.height = 6, fig.width = 11, echo=FALSE, warning=FALSE, message=FALSE}
+# Prepare data for ggplot
+gather_df <- mb_train %>% 
+  gather(key = 'variable', value = 'value')
+# Boxplots for each variable
+ggplot(gather_df, aes(variable, value)) + 
+  geom_boxplot(alpha=0.3) +  theme(legend.position="none")+    scale_fill_brewer(palette="BuPu") +
+  facet_wrap(. ~variable, scales='free', ncol=5)
+```
+
+
+### Corr Plot
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+mat<-as.matrix(cor(mb_train[-1],use="pairwise.complete.obs"))
+col1 <- colorRampPalette(c("#7F0000", "red", "#FF7F00", "yellow", "white",
+                           "cyan", "#007FFF", "blue", "#00007F"))
+#corrplot(M, order = "hclust", addrect = 2, col = col1(100))
+corrplot(mat,order = "hclust", addrect = 2, col = col1(100),tl.cex=.5)
+```
+
+### Missing Data Percentage Calculation
+
+```{r ,  warning=FALSE, message=FALSE}
+
+col_sums_train <- colSums(mb_train %>% sapply(is.na))
+pct_missing <- round(col_sums_train / nrow(mb_train) * 100, 2)
+stack(sort(pct_missing, decreasing = TRUE))
+```
+
+
+### Data Exploration Next Steps
+
+1. The below fields are having missing information in the descending order.
+  TEAM_BATTING_HBP, TEAM_BASERUN_CS, TEAM_FIELDING_DP, TEAM_BASERUN_SB, TEAM_BATTING_SO, TEAM_PITCHING_SO
+2. TEAM_BATTING_HBP need to be removed.
+3. Set median values to TEAM_BASERUN_CS, TEAM_FIELDING_DP, TEAM_BASERUN_SB, TEAM_BATTING_SO, TEAM_PITCHING_SO
+
+## 2. Data Preparation
+
+### Correct the missing information
+```{r ,  warning=FALSE, message=FALSE}
+mb_train <- mb_train %>% 
+   mutate_all(~ifelse(is.na(.), median(., na.rm = TRUE), .))
+mb_train <- subset(mb_train, select = -c(TEAM_BATTING_HBP) )
+```
+
+
+### Data Transformation
+
+In the data transformation phase , Box Cox, centering and scaling methods are used for performing data transformation of predictors. Density PLots are created once again to showcase the difference between the original data and the transformed data.
+
+```{r, fig.height = 6, fig.width = 11, echo=FALSE, warning=FALSE, message=FALSE}
+library(caret)
+library(reshape)
+mb_trans = preProcess(mb_train,c("BoxCox", "center", "scale"))
+mb_predictorsTrans = data.frame(mb_trans = predict(mb_trans,mb_train))
+      
+#Density plot of modified data
+mb_dataTrans = melt(mb_predictorsTrans)
+ggplot(mb_dataTrans, aes(x= value)) + 
+    geom_density(fill='red') + facet_wrap(~variable, scales = 'free')       
+```
+
+## 3. Models
+
+**Linear Regression Model 1**
+
+```{r, fig.height = 5, fig.width = 11, echo=FALSE, warning=FALSE, message=FALSE}
+
+mb_final <- mb_predictorsTrans
+
+model1 <- lm(mb_trans.TARGET_WINS ~., mb_final)
+
+summary(model1)
+plot(model1)
+```
+
+**Linear Regression Model 2**
+
+```{r, fig.height = 6, fig.width = 11, echo=FALSE, warning=FALSE, message=FALSE}
+
+model2 <- lm(mb_trans.TARGET_WINS ~ mb_trans.TEAM_BATTING_H  + mb_trans.TEAM_BATTING_3B  + mb_trans.TEAM_BATTING_HR  + mb_trans.TEAM_BATTING_BB + mb_trans.TEAM_BATTING_SO + mb_trans.TEAM_BASERUN_SB + mb_trans.TEAM_PITCHING_SO + mb_trans.TEAM_PITCHING_H + mb_trans.TEAM_PITCHING_SO + mb_trans.TEAM_FIELDING_E + mb_trans.TEAM_FIELDING_DP, mb_final)
+
+summary(model2)
+plot(model2)
+```
+
+**Linear Regression Model 3**
+
+```{r, fig.height = 6, fig.width = 11, echo=FALSE, warning=FALSE, message=FALSE}
+model3 <- lm(mb_trans.TARGET_WINS ~ mb_trans.TEAM_BATTING_H  + mb_trans.TEAM_BATTING_3B  + mb_trans.TEAM_BATTING_HR  + mb_trans.TEAM_BATTING_BB + mb_trans.TEAM_BATTING_SO + mb_trans.TEAM_BASERUN_SB  + mb_trans.TEAM_FIELDING_E + mb_trans.TEAM_FIELDING_DP, mb_final)
+
+summary(model3)
+plot(model3)
+```
+
+## 4.Select Models
+### Model Metrics
+```{r}
+Model <- c("Model 1", "Model 2", "Model 3")
+Standard_Error <- c(0.8337, 0.836, 0.8379)
+Multiple_R_squared <- c(0.3092, 0.3042, 0.3003)
+Adjusted_R_squared <- c(0.3049, 0.3011, 0.2979)
+
+df1 <- data.frame(Model, Standard_Error, Multiple_R_squared, Adjusted_R_squared)
+df1
+```
+
+### ANOVA Test
+
+```{r}
+anova(model1, model2, model3)
+```
+
+## Conclusion
+
+To Conclude , after comparing three models based on full dataset , partial dataset and key variables in the dataset , it is evident that the Linear regression model # 3 functions well as it satisfies the assumptions of linear regression and the p-value is very low. 
+
+Hence Model selected is Linear Regression Model # 3. 
+
+```{r, fig.height = 6, fig.width = 11, echo=FALSE, warning=FALSE, message=FALSE}
+summary(model3)
+plot(model3)
+```
