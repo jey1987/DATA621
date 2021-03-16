@@ -1,0 +1,166 @@
+---
+title: "HW2_Jeyaraman_Ramalingam"
+author: "Jeyaraman Ramalingam"
+date: "3/15/2021"
+output:
+  html_document:
+    df_print: paged
+    toc: yes
+    toc_float:
+      collapsed: no
+      smooth_scroll: no
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(dplyr)
+library(readr)
+library(ggplot2)
+```
+
+
+### Input Dataset
+```{r ,echo=TRUE}
+df <- read_csv("classification-output-data.csv")
+summary(df)
+```
+
+### Confusion Matrix
+```{r ,echo=TRUE}
+table(df$class,df$scored.class)
+```
+
+### Accuracy
+```{r echo=TRUE}
+pred_accuracy <- function(df){
+  df_tbl=table(df$class,df$scored.class)
+  true_negatives <- df_tbl[1,1]
+  false_positives <- df_tbl[1,2]
+  false_negatives <- df_tbl[2,1]
+  true_positives <- df_tbl[2,2]
+  accuracy = (true_positives + true_negatives)/(true_negatives+false_positives+false_negatives+true_positives)
+  
+  return(accuracy)
+  
+}
+pred_accuracy(df)
+
+```
+
+### CER
+```{r echo=TRUE}
+pred_CER <- function(df){
+  df_tbl=table(df$class,df$scored.class)
+  true_negatives <- df_tbl[1,1]
+  false_positives <- df_tbl[1,2]
+  false_negatives <- df_tbl[2,1]
+  true_positives <- df_tbl[2,2]
+  CER = (false_positives + false_negatives)/(true_negatives+false_positives+false_negatives+true_positives)
+  
+  return(CER)
+  
+}
+pred_CER(df)
+
+```
+
+### Precision
+```{r echo=TRUE}
+pred_precision <- function(df){
+  df_tbl=table(df$class,df$scored.class)
+  false_positives <- df_tbl[1,2]
+  true_positives <- df_tbl[2,2]
+  CER = (true_positives)/(false_positives+true_positives)
+  
+  return(CER)
+  
+}
+pred_precision(df)
+
+```
+
+### Sensitivity
+```{r echo=TRUE}
+pred_sensitivity <- function(df){
+  df_tbl=table(df$class,df$scored.class)
+  false_negatives <- df_tbl[2,1]
+  true_positives <- df_tbl[2,2]
+  sensitivity = (true_positives)/(false_negatives+true_positives)
+  
+  return(sensitivity)
+  
+}
+pred_sensitivity(df)
+
+```
+
+### Specificity
+```{r echo=TRUE}
+pred_specificity <- function(df){
+  df_tbl=table(df$class,df$scored.class)
+  true_negatives <- df_tbl[1,1]
+  false_positives <- df_tbl[1,2]
+  specificity = (true_negatives)/(true_negatives+false_positives)
+  
+  return(specificity)
+  
+}
+pred_specificity(df)
+
+```
+
+### F1 Score
+```{r echo=TRUE}
+pred_f_score <- function(df){
+  
+  f_score = (2*pred_precision(df) * pred_sensitivity(df))/(pred_precision(df)+pred_sensitivity(df))
+  return(f_score)
+}
+pred_f_score(df)
+
+```
+
+### F1 Score Interpretation
+  The F-Score is equal to 0.607 and It is in the range 0 < f_score < 1
+
+### ROC Curve - Manual Calculation
+```{r echo=TRUE}
+```
+
+### Metrics Output
+```{r echo=TRUE}
+library(kableExtra)
+result <- data.frame(Accuracy=pred_accuracy(df),CER=pred_CER(df),Precision=pred_precision(df),Sensitivity=pred_sensitivity(df),Specificity=pred_specificity(df),F_Score=pred_f_score(df))
+
+result %>%
+  kbl() %>%
+  kable_material_dark()
+
+```
+
+### Caret Package
+```{r echo=TRUE}
+library(caret)
+confusionMatrix(data=as.factor(df$scored.class),reference=as.factor(df$class), positive = "1")
+```
+
+### ROC - R Package
+```{r echo=TRUE}
+pred_roc_curve <- function(labels,predictions){
+  library(pROC)
+  pROC_obj <- roc(labels,predictions,
+                  smoothed = TRUE,
+                  # arguments for ci
+                  ci=TRUE, ci.alpha=0.9, stratified=FALSE,
+                  # arguments for plot
+                  plot=TRUE, auc.polygon=TRUE, max.auc.polygon=TRUE, grid=TRUE,
+                  print.auc=TRUE, show.thres=TRUE)
+  sens.ci <- ci.se(pROC_obj)
+  plot(sens.ci, type="shape", col="lightblue")
+  ## Warning in plot.ci.se(sens.ci, type = "shape", col = "lightblue"): Low
+  ## definition shape.
+  plot(sens.ci, type="bars")
+  
+}
+pred_roc_curve(df$class,df$scored.probability)
+```
