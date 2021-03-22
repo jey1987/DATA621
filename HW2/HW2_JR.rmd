@@ -16,6 +16,8 @@ knitr::opts_chunk$set(echo = TRUE)
 library(dplyr)
 library(readr)
 library(ggplot2)
+library(AUC)
+library(cvAUC)
 ```
 
 
@@ -31,6 +33,12 @@ table(df$class,df$scored.class)
 ```
 
 ### Accuracy
+
+Formula for Accuracy is 
+
+$$Accuracy =\frac{TP+TN}{TP+FP+TN+FN}$$
+
+
 ```{r echo=TRUE}
 pred_accuracy <- function(df){
   df_tbl=table(df$class,df$scored.class)
@@ -48,6 +56,11 @@ pred_accuracy(df)
 ```
 
 ### CER
+
+Formula for CER is 
+
+$$CER =\frac{FP+FN}{TP+FP+TN+FN}$$
+
 ```{r echo=TRUE}
 pred_CER <- function(df){
   df_tbl=table(df$class,df$scored.class)
@@ -65,14 +78,19 @@ pred_CER(df)
 ```
 
 ### Precision
+
+Formula for Precision is 
+
+$$Precisiion =\frac{TP}{TP+FP}$$
+
 ```{r echo=TRUE}
 pred_precision <- function(df){
   df_tbl=table(df$class,df$scored.class)
   false_positives <- df_tbl[1,2]
   true_positives <- df_tbl[2,2]
-  CER = (true_positives)/(false_positives+true_positives)
+  precision = (true_positives)/(false_positives+true_positives)
   
-  return(CER)
+  return(precision)
   
 }
 pred_precision(df)
@@ -80,6 +98,12 @@ pred_precision(df)
 ```
 
 ### Sensitivity
+
+Formula for Sensitivity is 
+
+$$Sensitivity =\frac{TP}{TP+FN}$$
+
+
 ```{r echo=TRUE}
 pred_sensitivity <- function(df){
   df_tbl=table(df$class,df$scored.class)
@@ -95,6 +119,11 @@ pred_sensitivity(df)
 ```
 
 ### Specificity
+
+Formula for Specificity is 
+
+$$Specificity =\frac{TN}{TN+FP}$$
+
 ```{r echo=TRUE}
 pred_specificity <- function(df){
   df_tbl=table(df$class,df$scored.class)
@@ -110,6 +139,11 @@ pred_specificity(df)
 ```
 
 ### F1 Score
+
+Formula for F1 Score is 
+
+$$F1 Score =\frac{2*Precision*Sensitivity}{Precision+Sensitivity}$$
+
 ```{r echo=TRUE}
 pred_f_score <- function(df){
   
@@ -124,7 +158,35 @@ pred_f_score(df)
   The F-Score is equal to 0.607 and It is in the range 0 < f_score < 1
 
 ### ROC Curve - Manual Calculation
-```{r echo=TRUE}
+```{r}
+roc_function<- function(d){ 
+  #Create a count
+  temp <- table(d[ ,'class'], d[ ,"scored.probability"])
+  #Calculate frequency
+  allPos <- sum(df$class == 1, na.rm=TRUE)
+  allNeg <- sum(df$class == 0, na.rm=TRUE)
+  #Set threshold
+  threshold <- seq(0,1,0.01)
+  #Calculating probability for threshold
+  x <- c()
+  y <- c()
+  for (i in 1:length(threshold)) {
+    TP <- sum(df$scored.probability >= threshold[i] & df$class == 1, na.rm=TRUE)
+    TN <- sum(df$scored.probability < threshold[i] & df$class == 0, na.rm=TRUE)
+    y[i] <- TP / allPos
+    x[i] <- 1-TN / allNeg
+  }  
+  rocPlot <- plot(x,y,type = "s", xlim=c(-0.5,1.5),
+                  main = "ROC Curve from function",
+                  xlab = "1-Specificity",
+                  ylab = "Sensitivity")
+  fPlot <- abline(0,1); fPlot
+  xd <- c(0, abs(diff(x)))
+  fAuc <- sum(xd*y); fAuc
+  print(paste0("Area under the curve: ", fAuc))
+}
+
+roc_function(df)
 ```
 
 ### Metrics Output
