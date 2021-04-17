@@ -1,0 +1,416 @@
+---
+title: "Homework 3"
+author: "Discussion Group 1"
+date: "04/09/2021"
+output:
+  html_document:
+    toc: yes
+    toc_depth: '2'
+    df_print: paged
+  pdf_document:
+    toc: yes
+    toc_depth: 2
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+\newpage
+
+
+```{r, message=FALSE,warning=FALSE, echo=F}
+# loading libraries
+library(tidyverse)
+library(caret)
+library(pROC)
+library(knitr)
+library(Amelia)
+library(naniar)
+library(reshape2)
+library(stats)
+library(corrplot)
+library(e1071)
+library(jtools)
+library(performance)
+library(rJava)
+library(glmulti)
+library(cvms)
+library(ROCR)
+library(MASS)
+```
+
+
+# Overview
+
+In this homework assignment, you will explore, analyze and model a data set containing information on crime for various neighborhoods of a major city. Each record has a response variable indicating whether or not the crime rate is above the median crime rate (1) or not(0). <br>
+<br>
+Your objective is to build a binary logistic regression model on the training data set to predict whether the neighborhood will be at risk for high crime levels. You will provide classifications and probabilities for the evaluation data set using your binary logistic regression model. You can only use the variables given to you (or variables that you derive from the variables provided). Below is a short description of the variables of interest in the data set: <br>
+
+- **zn**: proportion of residential land zoned for large lots (over 25000 square feet) (predictor variable)
+- **indus**: proportion of non-retail business acres per suburb (predictor variable)
+- **chas**: a dummy var. for whether the suburb borders the Charles River (1) or not (0) (predictor variable)
+- **nox**: nitrogen oxides concentration (parts per 10 million) (predictor variable)
+- **rm**: average number of rooms per dwelling (predictor variable)
+- **age**: proportion of owner-occupied units built prior to 1940 (predictor variable)
+- **dis**: weighted mean of distances to five Boston employment centers (predictor variable)
+- **rad**: index of accessibility to radial highways (predictor variable)
+- **tax**: full-value property-tax rate per $10,000 (predictor variable)
+- **ptratio**: pupil-teacher ratio by town (predictor variable)
+- **black**: 1000(Bk - 0.63)2 where Bk is the proportion of blacks by town (predictor variable)
+- **lstat**: lower status of the population (percent) (predictor variable)
+- **medv**: median value of owner-occupied homes in $1000s (predictor variable)
+- **target**: whether the crime rate is above the median crime rate (1) or not (0) (response variable)   
+
+# Data Exploration
+
+## Load Input Datasets
+
+```{r}
+training <- read.csv('./crime-training-data_modified.csv')
+training2 <- training # for melting and box plot
+evaluation <- read.csv('./crime-evaluation-data_modified.csv')
+
+training %>% head() %>% kable() 
+```
+
+## Numerical Summaries
+
+```{r}
+summary(training)
+```
+
+## Missing Data Check
+
+Missmap Plot illustrates there are no missing values in the Input Dataset. Each column has complete values and lets check the skewness of the values in the input columns.
+
+```{r, message=FALSE, warning=FALSE}
+missmap(training, main="Missing Values") 
+colSums(is.na(training))
+```
+
+## Skewness Check
+
+The histograms and density plots provides us a better understanding on the distribution of values in the columns. 
+
+The variables zn, age, dis, ptratio, black and lstat are heavily skewed.
+
+
+```{r,message=FALSE,warning=FALSE}
+nonbinary <- c(1:2, 4:13)
+X <- training[ , -14]
+
+par(mfrow = c(3,4))
+for (i in nonbinary) {
+  hist(X[ ,i], xlab = names(X[i]), main = names(X[i]))
+  d <- density(X[,i])
+  plot(d, main = names(X[i]))
+  polygon(d, col="red")
+}
+
+# Converting to factor
+var <- c("chas","target")
+training[,var] <- lapply(training[,var], as.factor)
+evaluation$chas <- as.factor(evaluation$chas)
+
+
+# Density plot to check normality
+melt(training2, id.vars='target') %>% mutate(target = as.factor(target)) %>% 
+  ggplot(., aes(x=value))+geom_density(fill='gray')+facet_wrap(~variable, scales='free')+
+  labs(title="Density Plot for Normality and Skewness") + 
+  theme_classic()
+
+# Skewness and outliers
+sapply(training2, skewness, function(x) skewness(x))
+
+```
+
+## Box Plot Distributions 
+
+Box Plot to see how target variable is distributed
+
+```{r, message=FALSE, warning=FALSE}
+# Boxplot to see distributions with target variable
+melt(training2, id.vars='target') %>% mutate(target = as.factor(target)) %>% 
+  ggplot(., aes(x=variable, y=value))+geom_boxplot(aes(fill=target))+facet_wrap(~variable, dir='h',scales='free')+ labs(title="BoxPlot - Predictors Data Distribution with Target Variable")
+```
+
+## Correlation Plot
+
+Correlation Plot illustrates the relationship between the variables in the input dataset.
+
+```{r,message=FALSE,warning=FALSE}
+# Correlation matrix among variables
+training2 %>% 
+  cor(., use = "complete.obs") %>%
+  corrplot(., method = "color", type = "upper", tl.col = "black", tl.cex=.8, diag = FALSE)
+
+# Correlation table 
+correlation <- training2 %>% 
+  cor(., use = "complete.obs") %>%
+  as.data.frame() %>%
+  rownames_to_column()%>%
+  gather(Variable, Correlation, -rowname) 
+
+correlation %>%
+  filter(Variable == "target") %>%
+     arrange(desc(Correlation)) %>%
+  kable() 
+
+```
+
+# Data Preparation
+
+## Data Splitting
+
+The Input dataset is split into training and test data using createDataPartition function. The ratio of splitup is 70% for training and 30% for test data.
+
+
+```{r, message=FALSE, warning=FALSE}
+# Data splitting into train and test datasets out of training2
+set.seed(1003)
+training_partition <- createDataPartition(training2$target, p=0.7, list = FALSE, times=1)
+train2 <- training2[training_partition, ]
+test2 <- training2[-training_partition, ]
+
+sapply(training2, skewness, function(x) skewness(x))
+```
+
+## Log transformation
+
+The Predictor variable zn ( proportion of residential land zoned ) is transformed using log10 function and the transformation is applied to both training and test data.
+
+```{r, warning=FALSE, message=FALSE}
+train_log <- train2 # copy of basic model for log transformation
+test_log <- test2
+
+
+train_log$zn <- log10(train_log$zn + 1)
+test_log$zn <- log10(test_log$zn + 1)
+
+# Plot and check skewness
+sapply(train_log, skewness, function(x) skewness(x))
+ggplot(melt(train_log), aes(x=value))+geom_density()+facet_wrap(~variable, scales='free') + labs(title="Log Transformation")
+
+```
+
+## BoxCox Transformation
+
+The three methods BoxCox, center and scale is used for preprocessing the dataset. 
+
+The BoxCox transformation is used for transforming a non-normally distributed data set into a normal distributed. 
+
+
+```{r, message=FALSE, warning=FALSE}
+# Copy of train and test
+train_boxcox <- train2
+test_boxcox <- test2
+
+# Preprocessing
+preproc_value <- preProcess(train2[,-1] , c("BoxCox", "center", "scale"))
+
+# Transformation on both train and test datasets
+train_boxcox_transformed <- predict(preproc_value, train_boxcox)
+test_boxcox_transformed <- predict(preproc_value, test_boxcox)
+
+ggplot(melt(train_boxcox_transformed), aes(x=value))+geom_density()+facet_wrap(~variable, scales='free') + labs(title="BoxCox Transformation")
+sapply(train_boxcox_transformed, function(x) skewness(x))
+```
+
+## Derive New Variables
+
+New variables are created by applying some transformation logic on the existing values. The transformation list can be found in the R code below. The transformation is applied on both training and test data set.
+
+```{r}
+# Copying test and train subset to unique variable name 
+train_M2 <- train2
+test_M2 <- test2
+
+# Calcuated vars on test set
+
+test_M2$target <- as.factor(test_M2$target)
+test_M2$cfas <- as.factor(test_M2$chas)
+test_M2$business<-test_M2$tax*(1-test_M2$indus)
+test_M2$apartment<-test_M2$rm/test_M2$tax
+test_M2$pollution<-test_M2$nox*test_M2$indus
+test_M2$zndum <- ifelse(test_M2$zn>0,1,0)
+test_M2$rmlog<-log(test_M2$rm)
+test_M2$raddum <- ifelse(test_M2$rad>23,1,0)
+test_M2$lstatptratio<-((1-test_M2$lstat)*test_M2$ptratio)#/test_M2$rm
+
+# Calcuated vars on test set
+
+train_M2$target <- as.factor(train_M2$target)
+train_M2$cfas <- as.factor(train_M2$chas)
+train_M2$business<-train_M2$tax*(1-train_M2$indus)
+train_M2$apartment<-train_M2$rm/train_M2$tax
+train_M2$pollution<-train_M2$nox*train_M2$indus
+train_M2$zndum <- ifelse(train_M2$zn>0,1,0)
+train_M2$rmlog<-log(train_M2$rm)
+train_M2$raddum <- ifelse(train_M2$rad>23,1,0)
+train_M2$lstatptratio<-((1-train_M2$lstat)*train_M2$ptratio)#/train_M2$rm
+
+ggplot(melt(train_M2), aes(x=value))+geom_density()+facet_wrap(~variable, scales='free') + labs(title="New Variables derivation")
+
+```
+
+## Lasso Transformation
+
+```{r}
+# Copying test and train subset to unique variable name 
+test_M3 <- test2
+train_M3 <- train2
+
+test_M3$target <- as.factor(test_M3$target)
+train_M3$target <- as.factor(train_M3$target)
+trainx = model.matrix(~.-target,data=train_M3)     
+newx = model.matrix(~.-target,data=test_M3)
+
+
+ggplot(melt(train_M3), aes(x=value))+geom_density()+facet_wrap(~variable, scales='free') + labs(title="Lasso Transformation")
+
+```
+
+# Build Models
+
+## Model 1 - Glmulti
+
+  The model glmulti is similar to Generalized Linear Model but it has ability to find confidence set of models (best models) from the list of all possible models (candidate models). Models are fitted with the specified fitting function (glm) and are ranked with the criterion 'aic' 
+  
+  The model takes training dataset and linear regression is calculated for response variable (target) and other explanatory variables. Summary of the model is displayed on the output and AUC (Area under the curve) is calcluated
+  
+  
+**Model by Forhad Akbar** 
+```{r, message=FALSE, warning=FALSE,echo=FALSE}
+test_M1 <- test2
+train_M1 <- train2
+```
+
+```{r, include=FALSE,message=FALSE, warning=FALSE,echo=FALSE}
+model1 <- glmulti(target ~ ., data = train_M1, level = 1, method="h", crit = "aic", plotty = FALSE, fitfunction = "glm", family=binomial)
+```
+
+```{r, message=FALSE, warning=FALSE}
+summary(model1@objects[[1]]) 
+```
+
+```{r, message=FALSE, warning=FALSE}
+test_M1$predictions<- predict(model1@objects[[1]], test_M1, type="response")
+test_M1$predicted =  as.factor(ifelse(test_M1$predictions >= 0.5, 1, 0))
+
+test_M1$target <- as.factor(test_M1$target)
+confusionMatrix(test_M1$predicted, test_M1$target, positive = '1')
+proc = roc(test_M1$target, test_M1$predictions)
+plot(proc)
+print(proc$auc)
+```
+
+
+## Model 2 - Stepwise Regression and Calculated Variables 
+
+The stepwise regression takes the predictors and adds/removes based on the significance of the predictors. At first the model is run with 0 predictors and the predictors are added in sequence based on its significance. Since the model chooses the predictors by itself all predictors (explanator variables) are considered for model against target variable.
+
+Adding to the stepwise regression we are also considering the transformed dataset with new variables derived from the existing variables.
+
+**Model by Adam Gersowitz**
+
+```{r, message=FALSE, warning=FALSE}
+Model_2 <- glm(target~., data = train_M2, family = "binomial") %>%
+  stepAIC(trace = FALSE)
+summary(Model_2)
+
+test_M2$predictions<-predict(Model_2, test_M2, type="response")
+test_M2$predicted =  as.factor(ifelse(test_M2$predictions >= 0.5, 1, 0))
+
+confusionMatrix(test_M2$predicted, test_M2$target, positive = '1')
+proc = roc(test_M2$target, test_M2$predictions)
+plot(proc)
+print(proc$auc)
+```
+## Model 3 - Lasso
+**Model by David Blumenstiel**
+
+```{r, message=FALSE, warning=FALSE}
+
+library(glmnet)  
+glmnetmodel <- cv.glmnet(x = trainx,   #Predictor variables
+                      y = train_M3[,names(train_M3) == "target"],   #Responce variable
+                      family = "binomial", #Has it do logistic regression
+                      nfolds = 10, #10 fold cv
+                      type.measure = "class",  #uses missclassification error as loss
+                      gamma = seq(0,1,0.1),  #Values to use for relaxed fit
+                      relax = TRUE,#Mixes relaxed fit with regluarized fit
+                      alpha = 1) #Basically a choice betwen lasso, ridge, or elasticnet regression.  Alpha = 1 is lasso.
+
+#Predicts the probability that the target variable is 1
+predictions <- predict(glmnetmodel, newx = newx, type = "response", s=glmnetmodel$lambda.min) 
+
+print(coef.glmnet(glmnetmodel, s = glmnetmodel$lambda.min))
+
+```
+
+```{r, message=FALSE, warning=FALSE}
+confusionMatrix(as.factor(ifelse(predictions >= 0.5, 1, 0)), test_M3$target, positive = '1')
+proc = roc(test_M3$target, predictions)
+plot(proc)
+print(proc$auc)
+```
+
+## Model Selection
+
+We selected Model 2 (Stepwise Regression with New Derived Variables) because of two key factors mentioned below.
+
+1. Confusion Matrix
+
+  The Confusion matrix values (accuracy, Sensitivity etc.) suggests the model 2 has higher values comparing to other models. For e.g. Accuracy of Model 2 is 97% while the glmulti and lasso model is around 92%. The other values illustrates the same result.
+
+2. AUC 
+
+  AUC provides aggregate    measure of performance across all threshold values. The AUC has to be higher for a model to perform better. The higher AUC value of 99% suggests the Stepwise model performs way better than other models.
+
+
+# Rerun model on entire training set
+
+```{r, warning=FALSE}
+evaluation_F <- evaluation
+training_F <- training
+
+evaluation_F$cfas <- as.factor(evaluation_F$chas)
+evaluation_F$business<-evaluation_F$tax*(1-evaluation_F$indus)
+evaluation_F$apartment<-evaluation_F$rm/evaluation_F$tax
+evaluation_F$pollution<-evaluation_F$nox*evaluation_F$indus
+evaluation_F$zndum <- ifelse(evaluation_F$zn>0,1,0)
+evaluation_F$rmlog<-log(evaluation_F$rm)
+evaluation_F$raddum <- ifelse(evaluation_F$rad>23,1,0)
+evaluation_F$lstatptratio<-((1-evaluation_F$lstat)*evaluation_F$ptratio)#/evaluation_F$rm
+
+training_F$target <- as.factor(training_F$target)
+training_F$cfas <- as.factor(training_F$chas)
+training_F$business<-training_F$tax*(1-training_F$indus)
+training_F$apartment<-training_F$rm/training_F$tax
+training_F$pollution<-training_F$nox*training_F$indus
+training_F$zndum <- ifelse(training_F$zn>0,1,0)
+training_F$rmlog<-log(training_F$rm)
+training_F$raddum <- ifelse(training_F$rad>23,1,0)
+training_F$lstatptratio<-((1-training_F$lstat)*training_F$ptratio)#/training_F$rm
+
+
+Model_F <- glm(target~., data = training_F, family = "binomial") %>%
+  stepAIC(trace = FALSE)
+summary(Model_F)
+
+
+```
+
+## Predict Test Set / Export results 
+
+```{r}
+predicted_probability <- predict(Model_F, evaluation_F, type = "response")
+predicted_class <-  as.factor(ifelse(predicted_probability >= 0.5, 1, 0))
+predictions <- data.frame(predicted_class,predicted_probability)
+colnames(predictions) <- c("predicted_class","predicted_probability")
+#write.csv(predictions, file = "predictions.csv")
+
+```
+
+
