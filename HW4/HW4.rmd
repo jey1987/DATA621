@@ -3,13 +3,13 @@ title: "Homework 3"
 author: "Discussion Group 1"
 date: "04/09/2021"
 output:
+  pdf_document:
+    toc: yes
+    toc_depth: 2
   html_document:
     toc: yes
     toc_depth: '2'
     df_print: paged
-  pdf_document:
-    toc: yes
-    toc_depth: 2
 ---
 
 ```{r setup, include=FALSE}
@@ -329,6 +329,10 @@ print(proc$auc)
 ```
 ## Model 3 - Lasso
 **Model by David Blumenstiel**
+
+Glmnet is an interesting package that allows us to fit various penalized regression models (including logistic regression), using Lasso or ridge regression, or a combination of the two (elastic-net).  
+
+For this model, we'll use Lasso (least absolute shrinkage and selection operator) regression.  This will penalize the model by the magnitude of the coefficients, which should result in a model with fewer coefficients that is less prone to over-fitting.
 
 ```{r, message=FALSE, warning=FALSE}
 
