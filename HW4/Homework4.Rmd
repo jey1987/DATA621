@@ -1,0 +1,415 @@
+---
+title: "DATA621_Homework4_JR"
+author: "Jeyaraman Ramalingam"
+date: "5/5/2021"
+output:
+  pdf_document:
+    toc: yes
+    toc_depth: '4'
+  html_document:
+    toc: yes
+    toc_depth: '4'
+    df_print: paged
+    toc_float: yes
+    theme: journal
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(caret)
+library(dplyr)
+library(gdata)
+library(tidyverse)
+library(Amelia)
+library(mice)
+library(kableExtra)
+library(data.table)
+library(e1071)
+library(corrplot)
+library(MASS)
+```
+
+## Overview
+
+In this homework assignment, you will explore, analyze and model a data set containing approximately 8000
+records representing a customer at an auto insurance company. Each record has two response variables. The
+first response variable, TARGET_FLAG, is a 1 or a 0. A “1” means that the person was in a car crash. A zero
+means that the person was not in a car crash. The second response variable is TARGET_AMT. This value is zero
+if the person did not crash their car. But if they did crash their car, this number will be a value greater than zero.
+Your objective is to build multiple linear regression and binary logistic regression models on the training data
+to predict the probability that a person will crash their car and also the amount of money it will cost if the person
+does crash their car. You can only use the variables given to you (or variables that you derive from the variables
+provided).
+
+
+## Data Exploration
+
+```{r, message=FALSE,warning=FALSE, echo=F}
+ins_train_input <- read.csv('insurance_training_data.csv')
+ins_eval_input <- read.csv('insurance-evaluation-data.csv')
+```
+
+### Insurance Training Data 
+
+#### Sample 
+```{r, message=FALSE,warning=FALSE, echo=F}
+ins_train_input %>% head() %>% kable()
+```
+
+#### Input Dataset Summaries
+```{r, message=FALSE,warning=FALSE, echo=F}
+summary(ins_train_input)
+
+```
+
+#### Missing Data Check
+```{r, message=FALSE,warning=FALSE, echo=F}
+colSums(is.na(ins_train_input))
+
+```
+
+### Insurance Evaluation Data 
+
+#### Sample 
+```{r, message=FALSE,warning=FALSE, echo=F}
+ins_eval_input %>% head() %>% kable() %>% kable_material()
+```
+#### Input Dataset Summaries
+```{r, message=FALSE,warning=FALSE, echo=F}
+summary(ins_eval_input)
+```
+
+#### Missing Data Check
+```{r, message=FALSE,warning=FALSE, echo=F}
+colSums(is.na(ins_eval_input))
+```
+
+### Findings
+
+The findings from Data Exploration on Training and Evaluation dataset are below.
+
+1. Some of the character columns are prefixed by 'z_' which needs to be corrected
+2. Numeric format for Dollar Amount fields need to be fixed.
+3. Imputation needs to be done for the missing values.
+
+We will perform all  of these exercises in the Data Preparation step.
+
+## Data Preparation
+
+### Training Data - Fix Formatting
+
+```{r,message=FALSE,warning=FALSE,echo=F}
+ins_train <- ins_train_input
+
+ins_train$INCOME <- gsub('z_','',ins_train$INCOME)
+ins_train$PARENT1 <- gsub('z_','',ins_train$PARENT1)
+ins_train$HOME_VAL <- gsub('z_','',ins_train$HOME_VAL)
+ins_train$MSTATUS <- gsub('z_','',ins_train$MSTATUS)
+ins_train$SEX <- gsub('z_','',ins_train$SEX)
+ins_train$EDUCATION <- gsub('z_','',ins_train$EDUCATION)
+ins_train$JOB <- gsub('z_','',ins_train$JOB)
+ins_train$CAR_USE <- gsub('z_','',ins_train$CAR_USE)
+ins_train$BLUEBOOK <- gsub('z_','',ins_train$BLUEBOOK)
+ins_train$CAR_TYPE <- gsub('z_','',ins_train$CAR_TYPE)
+ins_train$RED_CAR <- gsub('z_','',ins_train$RED_CAR)
+ins_train$OLDCLAIM <- gsub('z_','',ins_train$OLDCLAIM)
+ins_train$REVOKED <- gsub('z_','',ins_train$REVOKED)
+ins_train$URBANICITY <- gsub('z_','',ins_train$URBANICITY)
+
+ins_train$INCOME <- as.numeric(gsub('[$,]','',ins_train$INCOME))
+ins_train$HOME_VAL <- as.numeric(gsub('[$,]','',ins_train$HOME_VAL))
+ins_train$BLUEBOOK <- as.numeric(gsub('[$,]','',ins_train$BLUEBOOK))
+ins_train$OLDCLAIM <- as.numeric(gsub('[$,]','',ins_train$OLDCLAIM))
+ins_train %>% head() %>% kable() %>% kable_material()
+```
+
+### Training Data - Missing Data Check 
+
+```{r,message=FALSE,warning=FALSE,echo=F}
+colSums(is.na(ins_train))
+missmap(ins_train, main="Missing Values")
+```
+
+### Training Data - Missing Data Re-test
+
+```{r,message=FALSE,warning=FALSE,echo=F}
+ins_train_imputed <- mice(ins_train, m = 1, method = "pmm", print = F) %>% complete()
+
+colSums(is.na(ins_train_imputed))
+missmap(ins_train_imputed, main="Missing Values")
+```
+
+### Training Data - Summary
+```{r,message=FALSE,warning=FALSE,echo=F}
+summary(ins_train_imputed) %>% kable() %>% kable_material()
+```
+
+### Training Data - Histograms
+```{r,message=FALSE,warning=FALSE,echo=F}
+indx<- which(sapply(ins_train_imputed, is.numeric))
+
+ins_train_ordered <- ins_train_imputed
+setcolorder(ins_train_ordered, indx)
+
+nonbinary <- c(1:16)
+X <- ins_train_ordered[1:16]
+
+par(mfrow = c(3,3))
+for (i in nonbinary) {
+  hist(X[,i], xlab = names(X[i]), main = names(X[i]))
+}
+```
+
+### Training Data - Box Plots
+```{r,message=FALSE,warning=FALSE,echo=F}
+par(mfrow = c(3,3))
+for (i in nonbinary) {
+  d <- density(X[,i])
+  plot(d, main = names(X[i]))
+  polygon(d, col="red")
+}
+```
+
+### Training Data - Skewness Report
+```{r,message=FALSE,warning=FALSE,echo=F}
+sapply(X, skewness, function(x) skewness(x))
+```
+
+### Training Data - Correlation Report
+```{r,message=FALSE,warning=FALSE,echo=F}
+par(mfrow = c(1,1))
+# Correlation matrix among variables
+X %>% 
+  cor(., use = "complete.obs") %>%
+  corrplot(., method = "color", type = "upper", tl.col = "black", tl.cex=.8, diag = FALSE)
+```
+
+### Evaluation Data - Fix Formatting
+
+```{r,message=FALSE,warning=FALSE,echo=F}
+ins_eval <- ins_eval_input
+
+ins_eval$INCOME <- gsub('z_','',ins_eval$INCOME)
+ins_eval$PARENT1 <- gsub('z_','',ins_eval$PARENT1)
+ins_eval$HOME_VAL <- gsub('z_','',ins_eval$HOME_VAL)
+ins_eval$MSTATUS <- gsub('z_','',ins_eval$MSTATUS)
+ins_eval$SEX <- gsub('z_','',ins_eval$SEX)
+ins_eval$EDUCATION <- gsub('z_','',ins_eval$EDUCATION)
+ins_eval$JOB <- gsub('z_','',ins_eval$JOB)
+ins_eval$CAR_USE <- gsub('z_','',ins_eval$CAR_USE)
+ins_eval$BLUEBOOK <- gsub('z_','',ins_eval$BLUEBOOK)
+ins_eval$CAR_TYPE <- gsub('z_','',ins_eval$CAR_TYPE)
+ins_eval$RED_CAR <- gsub('z_','',ins_eval$RED_CAR)
+ins_eval$OLDCLAIM <- gsub('z_','',ins_eval$OLDCLAIM)
+ins_eval$REVOKED <- gsub('z_','',ins_eval$REVOKED)
+ins_eval$URBANICITY <- gsub('z_','',ins_eval$URBANICITY)
+
+ins_eval$INCOME <- as.numeric(gsub('[$,]','',ins_eval$INCOME))
+ins_eval$HOME_VAL <- as.numeric(gsub('[$,]','',ins_eval$HOME_VAL))
+ins_eval$BLUEBOOK <- as.numeric(gsub('[$,]','',ins_eval$BLUEBOOK))
+ins_eval$OLDCLAIM <- as.numeric(gsub('[$,]','',ins_eval$OLDCLAIM))
+ins_eval %>% head() %>% kable() %>% kable_material()
+```
+
+### Evaluation Data - Missing Data Check 
+
+```{r,message=FALSE,warning=FALSE,echo=F}
+colSums(is.na(ins_eval))
+missmap(ins_eval, main="Missing Values")
+```
+
+### Evaluation Data - Missing Data Re-test
+
+```{r,message=FALSE,warning=FALSE,echo=F}
+ins_eval_imputed <- mice(ins_eval, m = 1, method = "pmm", print = F) %>% complete()
+ins_eval_imputed[is.na(ins_eval_imputed)] = 0
+colSums(is.na(ins_eval_imputed))
+missmap(ins_eval_imputed, main="Missing Values")
+```
+
+### Evaluation Data - Summary
+```{r,message=FALSE,warning=FALSE,echo=F}
+summary(ins_eval_imputed) %>% kable() %>% kable_material()
+```
+
+### Evaluation Data - Histograms
+```{r,message=FALSE,warning=FALSE,echo=F}
+indx<- which(sapply(ins_eval_imputed, is.numeric))
+ins_eval_ordered <- ins_eval_imputed
+setcolorder(ins_eval_ordered, indx)
+
+nonbinary <- c(1:16)
+X <- ins_eval_ordered[1:16]
+
+par(mfrow = c(3,3))
+for (i in nonbinary) {
+  hist(X[,i], xlab = names(X[i]), main = names(X[i]))
+}
+```
+
+### Evaluation Data - Box Plots
+```{r,message=FALSE,warning=FALSE,echo=F}
+par(mfrow = c(3,3))
+for (i in nonbinary) {
+  d <- density(X[,i])
+  plot(d, main = names(X[i]))
+  polygon(d, col="red")
+}
+```
+
+### Evaluation Data - Skewness Report
+```{r,message=FALSE,warning=FALSE,echo=F}
+sapply(X, skewness, function(x) skewness(x))
+X<-X[4:16]
+ins_train_imputed_final <- ins_train_imputed %>% 
+  mutate(JOB=ifelse((JOB==""),"Unknown",JOB))
+
+ins_eval_imputed_final <- ins_eval_imputed %>% 
+  mutate(JOB=ifelse((JOB==""),"Unknown",JOB))
+```
+
+### Evaluation Data - Correlation Report
+```{r,message=FALSE,warning=FALSE,echo=F}
+par(mfrow = c(1,1))
+# Correlation matrix among variables
+X %>% 
+  cor(., use = "complete.obs") %>%
+  corrplot(., method = "color", type = "upper", tl.col = "black", tl.cex=.8, diag = FALSE)
+```
+
+## Data Models
+
+### Model Preparation
+
+The Training Insurance data is chosen and the train test split is created with 80% as factor. After the dataset split the plan is to create following models and predict evaluation dataset using the best model.
+
+1. Logistic Regression Model 1 - > TARGET FLAG and TARGET AMOUNT
+2. Logistic Regression Model 2 - > TARGET FLAG and Other Columns
+3. Logistic Regression Model 3 - > Stepwise regression
+
+```{r,message=FALSE,warning=FALSE,echo=F}
+set.seed(1003)
+training_partition <- createDataPartition(ins_train_imputed_final$TARGET_FLAG, p=0.8, list = FALSE, times=1)
+train2 <- ins_train_imputed_final[training_partition, ]
+test2 <- ins_train_imputed_final[-training_partition, ]
+```
+
+### Logistic Regression Model - 1
+
+The model glm is similar to Generalized Linear Model but it has ability to find confidence set of models (best models) from the list of all possible models (candidate models). Models are fitted with the specified fitting function (glm) and are ranked with the criterion 'aic' 
+  
+  The model takes training dataset and linear regression is calculated for response variable (TARGET_FLAG) and other explanatory variables. Summary of the model is displayed on the output and AUC (Area under the curve) is calcluated
+  
+```{r,message=FALSE,warning=FALSE,echo=F}
+model1 <- glm(formula = TARGET_FLAG ~ . - TARGET_AMT, family = binomial, data = train2)
+summary(model1)
+```
+
+AIC of the Model 1 is 5865.2
+
+
+
+### Logistic Regression Model - 1 Prediction Metrics
+
+Test dataset is used for predicting the output and the confusion matrix is used for comparing the output parameters.
+
+```{r,message=FALSE,warning=FALSE,echo=F}
+model1_pred <- predict(model1, test2, type = "response")
+model1_class <- ifelse(model1_pred >= 0.5, 1, 0)
+probability_class <- factor(model1_class, levels = c(1, 0))
+actual_class <- factor(test2$TARGET_FLAG, levels = c(1, 0))
+confusionMatrix(probability_class, actual_class)
+```
+Accuracy of the Model 1 is 79.4%
+
+### Logistic Regression Model - 2
+
+The model glm is similar to Generalized Linear Model but it has ability to find confidence set of models (best models) from the list of all possible models (candidate models). Models are fitted with the specified fitting function (glm) and are ranked with the criterion 'aic' 
+  
+  The model takes training dataset and linear regression is calculated for response variable (TARGET_FLAG) and other explanatory variables. Summary of the model is displayed on the output and AUC (Area under the curve) is calcluated
+  
+  
+```{r,message=FALSE,warning=FALSE,echo=F}
+model2 <- glm(TARGET_FLAG ~ KIDSDRIV + HOMEKIDS + INCOME + PARENT1 + HOME_VAL + MSTATUS + EDUCATION + TRAVTIME + CAR_USE + BLUEBOOK + TIF + CAR_TYPE + CLM_FREQ + REVOKED + MVR_PTS + CAR_AGE + URBANICITY, data = train2, family = binomial)
+summary(model2)
+
+```
+
+AIC of the Model 2 is 5900
+
+### Logistic Regression Model - 2 Prediction Metrics
+
+Test dataset is used for predicting the output and the confusion matrix is used for comparing the output parameters.
+
+
+```{r,message=FALSE,warning=FALSE,echo=F}
+model2_pred <- predict(model2, test2, type = "response")
+model2_class <- ifelse(model2_pred >= 0.5, 1, 0)
+
+probability_class <- factor(model2_class, levels = c(1, 0))
+actual_class <- factor(test2$TARGET_FLAG, levels = c(1, 0))
+confusionMatrix(probability_class, actual_class)
+```
+Accuracy of the Model 2 is 78.4%
+
+### Logistic Regression Model - 3
+The stepwise regression takes the predictors and adds/removes based on the significance of the predictors. At first the model is run with 0 predictors and the predictors are added in sequence based on its significance. Since the model chooses the predictors by itself all predictors (explanator variables) are considered for model against target variable.
+
+Adding to the stepwise regression we are also considering the transformed dataset with new variables derived from the existing variables.
+
+```{r,message=FALSE,warning=FALSE,echo=F}
+model3 <- model2 %>% stepAIC(trace = F)
+summary(model3)
+
+```
+
+AIC of the Model 3 is 5897.4
+
+### Logistic Regression Model - 3 Prediction Metrics
+
+Test dataset is used for predicting the output and the confusion matrix is used for comparing the output parameters.
+
+
+```{r,message=FALSE,warning=FALSE,echo=F}
+model3_pred <- predict(model3, test2, type = "response")
+model3_class <- ifelse(model3_pred >= 0.5, 1, 0)
+
+probability_class <- factor(model3_class, levels = c(1, 0))
+actual_class <- factor(test2$TARGET_FLAG, levels = c(1, 0))
+confusionMatrix(probability_class, actual_class)
+```
+
+Accuracy of the Model 3 is 78.3%
+
+## Model Selection
+
+While comparing three models the best performing model is Logistic Regression  Model 3 with stepwise regression. The below parameters are considered for choosing the model 3 as best model.
+
+1. AIC value
+  Based on the AIC value we can say Model 2 is performing better.
+2. AUC
+  Based on the AUC value we can say Model 2 is performing better.
+3. Accuracy 
+  Based on the Accuracy value we can say Model 3 is performing better.
+  
+## Evaluation Data Prediction
+```{r,message=FALSE,warning=FALSE,echo=F}
+
+eval_pred <- predict(model2, ins_eval_imputed_final, type = "response")
+eval_class <- ifelse(eval_pred >= 0.5, 1, 0)
+eval_target_amt <- ifelse(eval_class == 1, predict(model3, ins_eval_imputed_final, type = "response"), 0)
+
+ins_eval_imputed_final$TARGET_FLAG <- eval_class
+ins_eval_imputed_final$TARGET_AMOUNT <- eval_target_amt
+
+ins_eval_imputed_final %>% head() %>% kable() %>% kable_material()
+
+```
+
+## Conclusion and Output
+```{r,message=FALSE,warning=FALSE,echo=F}
+ret <- write.csv(x=ins_eval_imputed_final, file="predicted_eval_insurance.csv")
+print(ret)
+```
+
+Overall we found that Model 2 (Logistic Regression with all explanatory variables) performs better in predicting the TARGET FLAG and TARGET AMOUNT for the evaluation data set. 
