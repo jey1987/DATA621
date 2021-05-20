@@ -1,0 +1,472 @@
+---
+title: "DATA621_Homework4_JR"
+author: "Jeyaraman Ramalingam"
+date: "5/5/2021"
+output:
+  pdf_document:
+    toc: yes
+    toc_depth: '4'
+  html_document:
+    toc: yes
+    toc_depth: '4'
+    df_print: paged
+    toc_float: yes
+    theme: journal
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(caret)
+library(dplyr)
+library(gdata)
+library(tidyverse)
+library(Amelia)
+library(mice)
+library(kableExtra)
+library(data.table)
+library(e1071)
+library(corrplot)
+library(MASS)
+library(pscl)
+```
+
+## Overview
+
+In this homework assignment, you will explore, analyze and model a data set containing information on
+approximately 12,000 commercially available wines. The variables are mostly related to the chemical properties of
+the wine being sold. The response variable is the number of sample cases of wine that were purchased by wine
+distribution companies after sampling a wine. These cases would be used to provide tasting samples to
+restaurants and wine stores around the United States. The more sample cases purchased, the more likely is a
+wine to be sold at a high end restaurant. A large wine manufacturer is studying the data in order to predict the
+number of wine cases ordered based upon the wine characteristics. If the wine manufacturer can predict the
+number of cases, then that manufacturer will be able to adjust their wine offering to maximize sales.
+
+## Data Exploration
+
+```{r, message=FALSE,warning=FALSE, echo=F}
+wine_train_input <- read.csv('wine-training-data.csv')
+wine_eval_input <- read.csv('wine-evaluation-data.csv')
+wine_train_input$INDEX <- wine_train_input$ï..INDEX
+
+drop <- c("ï..INDEX")
+wine_train_input = wine_train_input[,!(names(wine_train_input) %in% drop)]
+
+```
+
+### Wine Training Data 
+
+#### Sample 
+```{r, message=FALSE,warning=FALSE, echo=F}
+wine_train_input %>% head() %>% kable()
+```
+
+#### Input Dataset Summaries
+```{r, message=FALSE,warning=FALSE, echo=F}
+summary(wine_train_input)
+
+```
+
+#### Missing Data Check
+```{r, message=FALSE,warning=FALSE, echo=F}
+colSums(is.na(wine_train_input))
+
+missmap(wine_train_input, main="Missing Values")
+
+```
+
+### Wine Evaluation Data 
+
+#### Sample 
+```{r, message=FALSE,warning=FALSE, echo=F}
+wine_eval_input %>% head() %>% kable() %>% kable_material()
+```
+#### Input Dataset Summaries
+```{r, message=FALSE,warning=FALSE, echo=F}
+summary(wine_eval_input)
+```
+
+#### Missing Data Check
+```{r, message=FALSE,warning=FALSE, echo=F}
+colSums(is.na(wine_eval_input))
+
+missmap(wine_eval_input, main="Missing Values")
+```
+
+### Findings
+
+The findings from Data Exploration on Training and Evaluation dataset are below.
+
+1. Imputation needs to be done for the missing values.
+
+We will perform all  of these exercises in the Data Preparation step.
+
+## Data Preparation
+
+### Training Data - Missing Data Re-test
+
+```{r,message=FALSE,warning=FALSE,echo=F}
+wine_train_imputed <- mice(wine_train_input, m = 1, method = "pmm", print = F) %>% complete()
+wine_train_imputed[is.na(wine_train_imputed)]=0
+
+
+colSums(is.na(wine_train_imputed))
+
+missmap(wine_train_imputed, main="Missing Values")
+
+```
+
+### Training Data - Summary
+```{r,message=FALSE,warning=FALSE,echo=F}
+summary(wine_train_imputed) %>% kable() %>% kable_material()
+```
+
+### Training Data - Histograms
+```{r,message=FALSE,warning=FALSE,echo=F}
+X <- wine_train_imputed
+nonbinary <- c(1:16)
+par(mfrow = c(4,4))
+par(mar=c(1,1,1,1))
+for (i in nonbinary) {
+  hist(X[,i], xlab = names(X[i]), main = names(X[i]))
+}
+
+```
+
+### Training Data - Box Plots
+```{r,message=FALSE,warning=FALSE,echo=F}
+par(mfrow = c(4,4))
+par(mar=c(1,1,1,1))
+for (i in nonbinary) {
+  d <- density(X[,i])
+  plot(d, main = names(X[i]))
+  polygon(d, col="red")
+}
+```
+
+### Training Data - Skewness Report
+```{r,message=FALSE,warning=FALSE,echo=F}
+sapply(wine_train_imputed, skewness, function(x) skewness(x))
+```
+
+### Training Data - Correlation Report
+```{r,message=FALSE,warning=FALSE,echo=F}
+par(mfrow = c(1,1))
+# Correlation matrix among variables
+wine_train_imputed %>% 
+  cor(., use = "complete.obs") %>%
+  corrplot(., method = "color", type = "upper", tl.col = "black", tl.cex=.8, diag = FALSE)
+
+```
+
+
+
+### Evaluation Data - Missing Data Re-test
+
+```{r,message=FALSE,warning=FALSE,echo=F}
+wine_eval_imputed <- mice(wine_eval_input, m = 1, method = "pmm", print = F) %>% complete()
+wine_eval_imputed[is.na(wine_eval_imputed)]=0
+colSums(is.na(wine_eval_imputed))
+
+missmap(wine_eval_imputed, main="Missing Values")
+```
+
+### Evaluation Data - Summary
+```{r,message=FALSE,warning=FALSE,echo=F}
+summary(wine_eval_imputed) %>% kable() %>% kable_material()
+```
+
+### Evaluation Data - Histograms
+```{r,message=FALSE,warning=FALSE,echo=F}
+X <- wine_eval_imputed
+nonbinary <- c(1:16)
+par(mar=c(1,1,1,1))
+par(mfrow = c(4,4))
+for (i in nonbinary) {
+  hist(X[,i], xlab = names(X[i]), main = names(X[i]))
+}
+
+
+```
+
+### Evaluation Data - Box Plots
+```{r,message=FALSE,warning=FALSE,echo=F}
+par(mfrow = c(4,4))
+par(mar=c(1,1,1,1))
+for (i in nonbinary) {
+  d <- density(X[,i])
+  plot(d, main = names(X[i]))
+  polygon(d, col="red")
+}
+```
+
+### Evaluation Data - Skewness Report
+```{r,message=FALSE,warning=FALSE,echo=F}
+sapply(wine_eval_imputed, skewness, function(x) skewness(x))
+```
+
+### Evaluation Data - Correlation Report
+```{r,message=FALSE,warning=FALSE,echo=F}
+par(mfrow = c(1,1))
+# Correlation matrix among variables
+wine_eval_imputed %>% 
+  cor(., use = "complete.obs") %>%
+  corrplot(., method = "color", type = "upper", tl.col = "black", tl.cex=.8, diag = FALSE)
+
+```
+
+## Data Models
+
+### Model Preparation
+
+The Training Insurance data is chosen and the train test split is created with 80% as factor. After the dataset split the plan is to create following models and predict evaluation dataset using the best model.
+
+1. Poisson Regression  - > TARGET and other variables
+2. Zero Inflated Poisson - > TARGET and other variables
+3. Negative Binomial - > TARGET and other variables
+4. Linear Regression - > TARGET and other variables
+5. Linear Regression - > TARGET and STARS
+6. Step Wise Regression (Backward) -> TARGET and STARS
+7. Linear Regression -> TARGET and Derived Variable
+
+```{r,message=FALSE,warning=FALSE,echo=F}
+set.seed(1003)
+training_partition <- createDataPartition(wine_train_imputed$TARGET, p=0.8, list = FALSE, times=1)
+train2 <- wine_train_imputed[training_partition, ]
+test2 <- wine_train_imputed[-training_partition, ]
+```
+
+### Poisson Regression Model
+
+Poisson Regression models are best used for modeling events where the outcomes are counts. Or, more specifically, count data: discrete data with non-negative integer values that count something, like the number of times an event occurs during a given timeframe or the number of people in line at the grocery store.
+
+```{r,message=FALSE,warning=FALSE,echo=F}
+model1 <- glm(formula = TARGET ~ ., family = poisson, data = train2)
+summary(model1)
+
+```
+
+AIC of the Poisson Regression Model is 38388
+
+### Poisson Regression Model Prediction Metrics
+
+Test dataset is used for predicting the output and the confusion matrix is used for comparing the output parameters.
+
+```{r,message=FALSE,warning=FALSE,echo=F}
+model1_pred <- predict(model1, test2, type = "response")
+model1_class <- ifelse(model1_pred >= 0.5, 1, 0)
+probability_class <- factor(model1_class, levels = c(1, 0))
+actual_class <- factor(test2$TARGET, levels = c(1, 0))
+confusionMatrix(probability_class, actual_class)
+```
+
+Accuracy of the Model 1 is 7.9%
+
+### Zero Inflated Poisson
+
+Zero-inflated poisson regression is used to model count data that has an excess of zero counts  
+  
+```{r,message=FALSE,warning=FALSE,error=FALSE,echo=F}
+model2 <- zeroinfl(TARGET ~ ., data = train2)
+summary(model2)
+```
+
+AIC of the Zero Inflated Poisson is 38388
+
+### Vuong Test
+
+The Vuong non-nested test is based on a comparison of the predicted probabilities of two models that do not nest. Examples include comparisons of zero-inflated count models with their non-zero-inflated analogs (e.g., zero-inflated Poisson versus ordinary Poisson, or zero-inflated negative-binomial versus ordinary negative-binomial).
+
+```{r,message=FALSE,warning=FALSE,echo=F}
+vuong(model1,model2)
+```
+
+As a result of Vuong test , Model 2 performs better
+
+### Zero Inflated Poisson Prediction Metrics
+
+Test dataset is used for predicting the output and the confusion matrix is used for comparing the output parameters.
+
+
+```{r,message=FALSE,warning=FALSE,echo=F}
+
+model2_pred <- predict(model2, test2, type = "response")
+model2_class <- ifelse(model2_pred >= 0.5, 1, 0)#
+
+probability_class <- factor(model2_class, levels = c(1, 0))
+actual_class <- factor(test2$TARGET, levels = c(1, 0))
+confusionMatrix(probability_class, actual_class)
+```
+Accuracy of the Model 2 is 15%
+
+### Negative Binomial 
+
+Negative binomial regression is for modeling count variables, usually for over-dispersed count outcome variables.
+
+
+```{r,message=FALSE,warning=FALSE,echo=F}
+model3 <- glm.nb(TARGET ~ ., data = train2)
+summary(model3)
+
+
+```
+
+AIC of the Model 3 is 38390
+
+### Negative Binomial  Prediction Metrics
+
+Test dataset is used for predicting the output and the confusion matrix is used for comparing the output parameters.
+
+
+```{r,message=FALSE,warning=FALSE,echo=F}
+model3_pred <- predict(model3, test2, type = "response")
+model3_class <- ifelse(model3_pred >= 0.5, 1, 0)
+probability_class <- factor(model3_class, levels = c(1, 0))
+actual_class <- factor(test2$TARGET, levels = c(1, 0))
+confusionMatrix(probability_class, actual_class)
+```
+
+### Linear Regression Model (All Variables)
+
+Linear regression attempts to model the relationship between two variables by fitting a linear equation to observed data. ... A linear regression line has an equation of the form Y = a + bX, where X is the explanatory variable and Y is the dependent variable.
+
+
+```{r,message=FALSE,warning=FALSE,echo=F}
+model4 <- lm(TARGET ~ ., train2)
+summary(model4)
+```
+
+
+### Linear Regression (All Variables) Prediction Metrics
+
+Test dataset is used for predicting the output and the confusion matrix is used for comparing the output parameters.
+
+
+```{r,message=FALSE,warning=FALSE,echo=F}
+model4_pred <- predict(model4, test2, type = "response")
+model4_class <- ifelse(model4_pred >= 0.5, 1, 0)
+probability_class <- factor(model4_class, levels = c(1, 0))
+actual_class <- factor(test2$TARGET, levels = c(1, 0))
+confusionMatrix(probability_class, actual_class)
+```
+
+
+### Linear Regression Model (STARS)
+
+Linear regression attempts to model the relationship between two variables by fitting a linear equation to observed data. ... A linear regression line has an equation of the form Y = a + bX, where X is the explanatory variable and Y is the dependent variable.
+
+```{r,message=FALSE,warning=FALSE,echo=F}
+model5 <- lm(TARGET ~ STARS, train2)
+summary(model5)
+
+
+```
+
+### Linear Regression (STARS) Prediction Metrics
+
+Test dataset is used for predicting the output and the confusion matrix is used for comparing the output parameters.
+
+
+```{r,message=FALSE,warning=FALSE,echo=F}
+model5_pred <- predict(model5, test2, type = "response")
+model5_class <- ifelse(model5_pred >= 0.5, 1, 0)
+probability_class <- factor(model5_class, levels = c(1, 0))
+actual_class <- factor(test2$TARGET, levels = c(1, 0))
+confusionMatrix(probability_class, actual_class)
+```
+
+### Step Wise Linear Regression Model 
+The stepwise regression takes the predictors and adds/removes based on the significance of the predictors. At first the model is run with 0 predictors and the predictors are added in sequence based on its significance. Since the model chooses the predictors by itself all predictors (explanator variables) are considered for model against target variable.
+
+Adding to the stepwise regression we are also considering the transformed dataset with new variables derived from the existing variables.
+
+```{r,message=FALSE,warning=FALSE,echo=F}
+model6 <- step(model5,direction='backward')
+summary(model6)
+
+
+```
+
+
+### Stepwise Linear Regression (STARS) Prediction Metrics
+
+Test dataset is used for predicting the output and the confusion matrix is used for comparing the output parameters.
+
+
+```{r,message=FALSE,warning=FALSE,echo=F}
+model6_pred <- predict(model6, test2, type = "response")
+model6_class <- ifelse(model6_pred >= 0.5, 1, 0)
+probability_class <- factor(model6_class, levels = c(1, 0))
+actual_class <- factor(test2$TARGET, levels = c(1, 0))
+confusionMatrix(probability_class, actual_class)
+```
+
+
+
+### Linear Regression (Derived Variable)
+
+Linear regression attempts to model the relationship between two variables by fitting a linear equation to observed data. ... A linear regression line has an equation of the form Y = a + bX, where X is the explanatory variable and Y is the dependent variable.
+
+```{r,message=FALSE,warning=FALSE,echo=F}
+
+wine_train_imputed$totalAcid <- wine_train_imputed$FixedAcidity + wine_train_imputed$VolatileAcidity + wine_train_imputed$CitricAcid
+
+wine_eval_imputed$totalAcid <- wine_eval_imputed$FixedAcidity + wine_eval_imputed$VolatileAcidity + wine_eval_imputed$CitricAcid
+
+
+set.seed(1003)
+training_partition <- createDataPartition(wine_train_imputed$TARGET, p=0.8, list = FALSE, times=1)
+train2 <- wine_train_imputed[training_partition, ]
+test2 <- wine_train_imputed[-training_partition, ]
+
+model7 <- lm(TARGET ~ totalAcid, train2)
+summary(model7)
+
+
+```
+
+### Linear Regression (Derived Variables) Prediction Metrics
+
+Test dataset is used for predicting the output and the confusion matrix is used for comparing the output parameters.
+
+
+```{r,message=FALSE,warning=FALSE,echo=F}
+model7_pred <- predict(model7, test2, type = "response")
+model7_class <- ifelse(model7_pred >= 0.5, 1, 0)
+probability_class <- factor(model7_class, levels = c(1, 0))
+actual_class <- factor(test2$TARGET, levels = c(1, 0))
+confusionMatrix(probability_class, actual_class)
+```
+
+Accuracy of the Model 3 is 78.3%
+
+## Model Selection
+
+While comparing all models based on AIC, Accuracy values we can safely say Model 2 performs better.
+
+
+## Evaluation Data Prediction
+
+The evaluation dataset is used for prediction purposes.
+
+```{r,message=FALSE,warning=FALSE,echo=F}
+
+
+eval_pred <- predict(model2, wine_eval_imputed, type = "response")
+eval_class <- ifelse(eval_pred >= 0.5, 1, 0)
+eval_target <- ifelse(eval_class == 1, predict(model3, wine_eval_imputed, type = "response"), 0)
+
+wine_eval_imputed$TARGET_FLAG <- eval_class
+wine_eval_imputed$TARGET <- eval_target
+
+wine_eval_imputed %>% head() %>% kable() %>% kable_material()
+
+
+```
+
+## Conclusion and Output
+```{r,message=FALSE,warning=FALSE,echo=F}
+ret <- write.csv(x=wine_eval_imputed, file="predicted_eval_wine.csv")
+print(ret)
+```
+
+Overall we found that Model 2 (Zero Inflated Poisson) performs better in predicting the TARGET value for the evaluation data set. 
