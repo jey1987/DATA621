@@ -1,0 +1,327 @@
+---
+title: "Final Project Data Analysis"
+author: "Jeyaraman Ramalingam"
+date: "5/5/2021"
+geometry: "left=1cm,right=1cm,top=2cm,bottom=2cm"
+output:
+  pdf_document:
+    toc: yes
+    toc_depth: '4'
+  html_document:
+    toc: yes
+    toc_depth: '4'
+    df_print: paged
+    toc_float: yes
+    theme: journal
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(skimr)
+library(caret)
+library(dplyr)
+library(gdata)
+library(tidyverse)
+library(Amelia)
+library(mice)
+library(kableExtra)
+library(data.table)
+library(e1071)
+library(corrplot)
+library(MASS)
+library(caret)
+library(tidyr)
+library(dplyr)
+library(data.table)
+library(maps)
+library("Hmisc")
+library("PerformanceAnalytics")
+
+```
+## Data Exploration
+
+```{r, message=FALSE,warning=FALSE, echo=F}
+load_chi2018 <- function(var_select = c("water_score", "sanitation_score", "child_mortality", "Year", "ISO3", "CountryName")) {
+  
+  
+  library(tidyr)
+  library(dplyr)
+  library(data.table)
+  
+  
+  set.seed(1234567890)
+  
+  df = read.csv("https://raw.githubusercontent.com/davidblumenstiel/CUNY-MSDS-DATA-621/main/Final_Project/chi-2018.csv")
+  
+  #Took some code from: https://stackoverflow.com/questions/50010196/replacing-na-values-from-another-dataframe-by-id
+  #and https://stackoverflow.com/questions/25908772/r-column-mean-by-factor
+  
+  x1 = df %>%
+    pivot_longer(
+      cols = starts_with("wat_"), 
+      names_to = "Year",
+      names_prefix = "wat_",
+      values_to = "water_score"
+    ) 
+  x1 = x1 %>% 
+    left_join(setDT(x1)[, mean(water_score, na.rm = TRUE), by=CountryName], by = "CountryName") %>%
+    mutate(water_score = ifelse(is.na(water_score), V1, water_score)) %>%
+    dplyr::select(Year, water_score, CountryName)   
+
+  x2 = df %>%
+    pivot_longer(
+      cols = starts_with("san_"), 
+      names_to = "Year",
+      names_prefix = "san_",
+      values_to = "sanitation_score"
+    ) 
+  x2 = x2 %>%
+    left_join(setDT(x2)[, mean(sanitation_score, na.rm = TRUE), by=CountryName], by = "CountryName") %>%
+    mutate(sanitation_score = ifelse(is.na(sanitation_score), V1, sanitation_score)) %>% #Replace NA with mean of values if available
+    dplyr::select("Year", "sanitation_score", "CountryName")    
+  
+  
+  
+  x3 = df %>%
+    pivot_longer(
+      cols = starts_with("chmort_"), 
+      names_to = "Year",
+      names_prefix = "chmort_",
+      values_to = "child_mortality"
+    ) 
+  x3 = x3 %>%
+    left_join(setDT(x3)[, mean(child_mortality, na.rm = TRUE), by=CountryName], by = "CountryName") %>%
+    mutate(child_mortality = ifelse(is.na(child_mortality), V1, child_mortality)) %>% #Replace NA with mean of values if available
+    dplyr::select("Year", "child_mortality", "CountryName")   
+  
+  
+  
+  x4 = df %>%
+    pivot_longer(
+      cols = starts_with("mortality_"), 
+      names_to = "Year",
+      names_prefix = "mortality_",
+      values_to = "mortality_score"
+    ) 
+  x4 = x4 %>%
+    left_join(setDT(x4)[, mean(mortality_score, na.rm = TRUE), by=CountryName], by = "CountryName") %>%
+    mutate(mortality_score = ifelse(is.na(mortality_score), V1, mortality_score)) %>% #Replace NA with mean of values if available
+    dplyr::select("Year", "mortality_score", "CountryName")   
+  
+  x5 = df %>%
+    pivot_longer(
+      cols = starts_with("CHI_v2018_"), 
+      names_to = "Year",
+      names_prefix = "CHI_v2018_",
+      values_to = "CHI_v2018"
+    ) 
+  x5 = x5 %>%
+    left_join(setDT(x5)[, mean(CHI_v2018, na.rm = TRUE), by=CountryName], by = "CountryName") %>%
+    mutate(CHI_v2018 = ifelse(is.na(CHI_v2018), V1, CHI_v2018)) %>% #Replace NA with mean of values if available
+    dplyr::select("Year", "CHI_v2018", "CountryName")   
+  
+  out = x1 %>% merge(x2, by = c("CountryName", "Year")) %>%
+    merge(x3, by = c("CountryName", "Year")) %>%
+    merge(x4, by = c("CountryName", "Year")) %>%
+    merge(x5, by = c("CountryName", "Year"))
+  
+  out = as.data.frame(out)
+  
+  
+  #Adds back ISO3 abbreviations 
+  out <- out %>% merge(x = out, y = df[,1:2], by.x = "CountryName", by.y = "CountryName")
+  colnames(out)[8] <- "ISO3"
+  
+  #NA dropping
+  out <- data.frame(out[,var_select]) %>% drop_na()
+  
+  
+  return(out)
+  
+}
+df_input <- load_chi2018(var_select=c("water_score", "sanitation_score", "child_mortality", "Year", "ISO3", "CountryName", "mortality_score", "CHI_v2018"))
+
+```
+
+### Child Mortality Data 
+
+#### Sample 
+  
+  
+```{r, message=FALSE,warning=FALSE, echo=F}
+df_input %>% head() %>% kable()
+```
+
+#### Input Dataset Summaries
+```{r, message=FALSE,warning=FALSE, echo=F}
+summary(df_input)
+```
+
+#### Missing Data Check
+
+This test is to ensure there are no missing values  ('NA') in the dataset and if there are missing values exist in the data then it has to imputed in the later stage. 
+
+```{r, message=FALSE,warning=FALSE, echo=F}
+colSums(is.na(df_input))
+missmap(df_input, main="Missing Values")
+```
+
+The missmap clearly shows that there are no missing values in the dataset.
+
+
+### Findings
+
+The findings from Data Exploration on Training and Evaluation dataset are below.
+
+1. There are no missing data
+2. Year column needs to be fixed
+3. Year Column need to be converted to Numeric Data type
+
+We will perform all  of these exercises in the Data Preparation step.
+
+## Data Preparation
+
+### Child Mortality Data - Fix Formatting
+
+As per the data dictionary provided by the data source the Year field consists of two digit values which is equivalent to four digit Year values. The values like '10' are mapped to '2010'. Hence it is necessary to have cleaner format before we proceed with the analysis and modeling of the data. Also the Year column was in character format at datasource and it is converted to Numeric format. 
+
+```{r,message=FALSE,warning=FALSE,echo=F}
+df_input$Year <- paste("20",df_input$Year,sep="",collapse=NULL)
+df_input$Year <- as.numeric(df_input$Year)
+```
+
+### Child Mortality Data - Histograms
+
+The histograms shows that the water, sanitation, mortality scores are left skewed and the child mortality is right skewed. Usually , the skewed datasets need to be fixed before proceeding with the models but the data consists of Yearly snapshot of scores and there wont be lot of derivation/data transformation with the source data. Hence we can proceed with the source dataset without any transformation / fix.
+
+```{r,message=FALSE,warning=FALSE,echo=F}
+indx<- which(sapply(df_input, is.numeric))
+setcolorder(df_input, indx)
+
+nonbinary <- c(1:6)
+X <- df_input[1:6]
+
+par(mfrow = c(3,3))
+for (i in nonbinary) {
+  hist(X[,i], xlab = names(X[i]), main = names(X[i]))
+}
+
+```
+
+### Child Mortality Data - Density Plots
+
+The Density Plots clearly illustrates the conclusion we arrived by looking at histograms. 
+
+```{r,message=FALSE,warning=FALSE,echo=F}
+par(mfrow = c(3,3))
+for (i in nonbinary) {
+  d <- density(X[,i])
+  plot(d, main = names(X[i]))
+  polygon(d, col="red")
+}
+```
+
+### Training Data - Skewness Report
+
+This is a programmatic skewness test used to justify the conclusion we made earlier. The values of skewness and function are below.
+
+```{r,message=FALSE,warning=FALSE,echo=F}
+#sapply(X, skewness, function(x) skewness(x))
+```
+
+
+1. water_score < 0 (Left Skewed)
+2. sanitation_score < 0 (Left Skewed)
+3. child mortality < 0 (Right Skewed)
+4. mortality score < 0 (Left Skewed)
+5. CHI v2018 < 0 (Left Skewed)
+
+### Training Data - Correlation Report
+
+The correlation matrix is used to investigate the dependence between multiple variables at the same time. The result is a table containing the correlation coefficients between each variable and the others.
+
+```{r,message=FALSE,warning=FALSE,echo=F}
+par(mfrow = c(1,1))
+
+res2 <- rcorr(as.matrix(X))
+
+res2$r
+
+res2$P
+
+
+# Correlation matrix among variables
+chart.Correlation(X, histogram=TRUE, pch=19)
+```
+
+As per the Correlation matrix the columns which are significant to child_mortality are water_score ,mortality_score, sanitation_score and CHI_v2018. This concludes that the source dataset is good for consideration of modeling.
+
+### Exploratory Data Analysis
+
+## Yearly Impact on Mortality - Water Resource and Sanitation
+
+This Analysis is to understand the dataset a little more. 
+
+The Objectives are below.
+
+1. To get to know how much impact water resource and sanitation has on the child mortality 
+2. Get the Yearly trend of the impact
+3. Understand how water resources and Sanitation levels are maintained globally over the years
+
+
+```{r,message=FALSE,warning=FALSE,echo=F}
+yearly_avg <- X %>%
+  dplyr::select(Year,water_score,sanitation_score,child_mortality) %>%
+  group_by(Year) %>%
+  summarise(water_avg=mean(water_score),sanitation_avg=mean(sanitation_score),child_mortality_avg = mean(child_mortality)) %>%
+  dplyr::select(Year,water_avg,sanitation_avg,child_mortality_avg) 
+
+ggp1<-ggplot(yearly_avg, aes(x=Year, y=water_avg)) +  geom_point(aes(size=child_mortality_avg),shape=18,color="red")  +   geom_smooth(method=lm,  linetype="dashed",  color="darkgreen", fill="gray") + xlab("Year") + ylab("Water Resource Scale")   + ggtitle("Yearly trend of Water Resource impact over Child Mortality")
+ggp2<-ggplot(yearly_avg, aes(x=Year, y=sanitation_avg)) +  geom_point(aes(size=child_mortality_avg),shape=18,color="blue")  +   geom_smooth(method=lm,  linetype="dashed",  color="darkgreen", fill="gray")+ xlab("Year") + ylab("Sanitation Scale")   + ggtitle("Yearly trend of Sanitation impact over Child Mortality")
+
+library(gridExtra)
+grid.arrange(ggp1,ggp2,ncol=2)
+
+```
+
+As per the two plots the following observations are made.
+
+1. Globally the Water resources have been in the increasing trend which means we were able to create and leverage existing water resources in the world.
+
+2. Sanitation levels are also in the rising trend as more awareness and investments towards sanitation has improved overall global sanitation levels.
+
+3. As the water resources and sanitation levels improve the child mortality is in the decreasing trend which concludes the strong correlation betwee the Child Mortality and Water resources/Sanitation levels.
+
+## World Map - Child Mortality Impacted Countries
+
+The next step of the analysis is to find out which areas are severely impacted in the world. If those areas are identified then it will be useful to invest more in the countries which has severe impact. 
+
+
+```{r,message=FALSE,warning=FALSE,echo=F}
+countries_child_mortality <- df_input %>%
+  dplyr::select(CountryName,water_score,sanitation_score,child_mortality) %>%
+  group_by(CountryName) %>%
+  summarise(water_avg=mean(water_score),sanitation_avg=mean(sanitation_score),child_mortality_avg = mean(child_mortality)) %>%
+  dplyr::select(CountryName,water_avg,sanitation_avg,child_mortality_avg) 
+
+countries_child_mortality$region <- countries_child_mortality$CountryName 
+
+countries_child_mortality <- countries_child_mortality %>%
+  mutate(region = ifelse(region == "United States", "USA", region)) %>%
+  mutate(region = ifelse(region == "Russian Federation", "Russia", region)) %>%
+  mutate(region = ifelse(region == "Iran (Islamic Republic of)", "Iran", region)) %>%
+  mutate(region = ifelse(region == "Kazakstan", "Kazakhstan", region))
+world_map <- map_data("world")
+
+
+child_mort_map <- left_join(world_map, countries_child_mortality, by = "region")
+
+
+
+ggplot(child_mort_map, aes(map_id = region, fill = child_mortality_avg))+
+  geom_map(map = child_mort_map,  color = "white")+
+  expand_limits(x = child_mort_map$long, y = child_mort_map$lat)+
+  scale_fill_viridis_c(option = "C")
+```
+
+The above world map with impact shows clearly that the African countries as well as few south american countries are severely impacted by child mortality . This could be possibly due to the lack of water resources and poor sanitation practices in those countries.
